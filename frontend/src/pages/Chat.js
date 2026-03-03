@@ -140,15 +140,6 @@ const GroundingModal = ({ open, onClose }) => {
         <div className="py-8">
           {!isComplete ? (
             <div className="text-center space-y-6 animate-fade-in" key={currentStep}>
-              {/* Zen stones image */}
-              <div className="w-32 h-32 mx-auto rounded-full overflow-hidden shadow-card">
-                <img 
-                  src="https://images.unsplash.com/photo-1770357012938-aacdb0b7e85f?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NzB8MHwxfHNlYXJjaHwxfHxzdGFja2VkJTIwemVuJTIwc3RvbmVzJTIwYmFsYW5jZSUyMHBlYWNlZnVsfGVufDB8fHx8MTc3MjUzODUyMHww&ixlib=rb-4.1.0&q=85"
-                  alt="Zen stones"
-                  className="w-full h-full object-cover animate-breathe"
-                />
-              </div>
-              
               <div className="space-y-2">
                 <div className="text-5xl mb-4">{step.emoji}</div>
                 <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10">
