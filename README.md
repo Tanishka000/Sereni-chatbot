@@ -24,7 +24,7 @@ A compassionate AI-powered chatbot designed for emotional support and suicide pr
 ## Project Structure
 
 ```
-sereni/
+sereni-chatbot/
 ├── frontend/                # React frontend
 │   ├── src/
 │   │   ├── components/     # UI components
@@ -36,6 +36,8 @@ sereni/
 │   ├── server.py           # Main API server
 │   ├── requirements.txt    # Python dependencies
 │   └── .env.example        # Environment template
+├── Dockerfile
+├── docker-compose.yml
 └── README.md
 ```
 
@@ -46,7 +48,7 @@ sereni/
 - Node.js (v18+)
 - Python (v3.9+)
 - MongoDB
-- OpenAI API Key (or Emergent LLM Key)
+- OpenAI API Key
 
 ### Backend Setup
 
@@ -62,7 +64,7 @@ pip install -r requirements.txt
 
 # Create .env file
 cp .env.example .env
-# Edit .env and add your API keys
+# Edit .env if needed
 
 # Run the server
 uvicorn server:app --reload --host 0.0.0.0 --port 8001
@@ -78,7 +80,6 @@ yarn install
 
 # Create .env file
 cp .env.example .env
-# Edit .env with your backend URL
 
 # Run the development server
 yarn start
@@ -94,9 +95,7 @@ Access at: `http://localhost:3000/sereni-chatbot`
 MONGO_URL=mongodb://localhost:27017
 DB_NAME=sereni_db
 CORS_ORIGINS=*
-EMERGENT_LLM_KEY=your_emergent_key_here
-# OR use OpenAI directly:
-# OPENAI_API_KEY=your_openai_key_here
+OPENAI_API_KEY=your_openai_api_key_here
 JWT_SECRET=your_secret_key_here
 JWT_ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=1440
@@ -136,13 +135,17 @@ The system analyzes messages for emotional content:
 - **Vandrevala Foundation**: 1860-2662-345
 - **AASRA**: 9820466726
 
-## Contributing
+## Docker Deployment
 
-This is an academic project. Feel free to fork and adapt for educational purposes.
+```bash
+docker-compose up --build
+```
+
+Access at: `http://localhost/sereni-chatbot`
 
 ## License
 
-MIT License - See LICENSE file for details.
+MIT License
 
 ---
 

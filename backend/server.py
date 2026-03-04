@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 import bcrypt
 import jwt
-from emergentintegrations.llm.chat import LlmChat, UserMessage
+from openai import OpenAI
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -22,8 +22,8 @@ mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
-# Emergent LLM Key
-EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY')
+# OpenAI client
+openai_client = OpenAI(api_key=os.environ.get('OPENAI_API_KEY'))
 
 # JWT Config
 JWT_SECRET = os.environ.get('JWT_SECRET', 'sereni_secret')
@@ -70,7 +70,7 @@ class MessageCreate(BaseModel):
 class MessageResponse(BaseModel):
     id: str
     content: str
-    role: str  # 'user' or 'assistant'
+    role: str
     sentiment: Optional[str] = None
     risk_level: Optional[str] = None
     timestamp: str
@@ -121,16 +121,13 @@ def analyze_sentiment_and_risk(message: str) -> tuple:
     """Analyze message for sentiment and risk level."""
     message_lower = message.lower()
     
-    # Check for high-risk phrases first (override)
     for phrase in HIGH_RISK_PHRASES:
         if phrase in message_lower:
             return "crisis", "high"
     
-    # Count distress and moderate keywords
     distress_count = sum(1 for kw in DISTRESS_KEYWORDS if kw in message_lower)
     moderate_count = sum(1 for kw in MODERATE_KEYWORDS if kw in message_lower)
     
-    # Determine risk level
     if distress_count >= 3:
         return "negative", "high"
     elif distress_count >= 1:
@@ -233,7 +230,6 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
 
 @api_router.post("/auth/register", response_model=TokenResponse)
 async def register(user_data: UserCreate):
-    # Check if user exists
     existing = await db.users.find_one({"email": user_data.email})
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -250,7 +246,6 @@ async def register(user_data: UserCreate):
     }
     
     await db.users.insert_one(user_doc)
-    
     token = create_access_token(user_id, user_data.email)
     
     return TokenResponse(
@@ -287,7 +282,6 @@ async def send_message(message_data: MessageCreate, current_user: dict = Depends
     user_id = current_user["id"]
     now = datetime.now(timezone.utc)
     
-    # Get or create conversation
     if message_data.conversation_id:
         conversation = await db.conversations.find_one(
             {"id": message_data.conversation_id, "user_id": user_id},
@@ -297,9 +291,7 @@ async def send_message(message_data: MessageCreate, current_user: dict = Depends
             raise HTTPException(status_code=404, detail="Conversation not found")
         conversation_id = message_data.conversation_id
     else:
-        # Create new conversation
         conversation_id = str(uuid.uuid4())
-        # Use first few words as title
         title = message_data.content[:50] + "..." if len(message_data.content) > 50 else message_data.content
         conversation = {
             "id": conversation_id,
@@ -310,10 +302,8 @@ async def send_message(message_data: MessageCreate, current_user: dict = Depends
         }
         await db.conversations.insert_one(conversation)
     
-    # Analyze sentiment and risk
     sentiment, risk_level = analyze_sentiment_and_risk(message_data.content)
     
-    # Save user message
     user_msg_id = str(uuid.uuid4())
     user_message = {
         "id": user_msg_id,
@@ -327,42 +317,32 @@ async def send_message(message_data: MessageCreate, current_user: dict = Depends
     }
     await db.messages.insert_one(user_message)
     
-    # Get conversation history for context
     history = await db.messages.find(
         {"conversation_id": conversation_id},
         {"_id": 0}
     ).sort("timestamp", 1).to_list(20)
     
-    # Build context string for LLM
     system_prompt = get_system_prompt(risk_level)
+    openai_messages = [{"role": "system", "content": system_prompt}]
     
-    # Build conversation context
-    context_messages = []
-    for msg in history[-10:]:  # Last 10 messages for context
-        role_prefix = "User" if msg["role"] == "user" else "Sereni"
-        context_messages.append(f"{role_prefix}: {msg['content']}")
+    for msg in history[-10:]:
+        openai_messages.append({
+            "role": msg["role"],
+            "content": msg["content"]
+        })
     
-    conversation_context = "\n".join(context_messages) if context_messages else ""
-    
-    # Create full prompt with context
-    full_prompt = f"{system_prompt}\n\nConversation so far:\n{conversation_context}"
-    
-    # Get AI response using Emergent integrations
     try:
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=f"sereni-{conversation_id}",
-            system_message=full_prompt
-        ).with_model("openai", "gpt-4o-mini")
-        
-        user_msg = UserMessage(text=message_data.content)
-        ai_content = await chat.send_message(user_msg)
-        
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=openai_messages,
+            temperature=0.8,
+            max_tokens=500
+        )
+        ai_content = response.choices[0].message.content
     except Exception as e:
-        logger.error(f"LLM API error: {e}")
+        logger.error(f"OpenAI API error: {e}")
         ai_content = "I'm here for you. I'm experiencing a brief moment of difficulty connecting, but please know that your feelings matter and you're not alone. Would you like to try sharing again?"
     
-    # Save AI message
     ai_msg_id = str(uuid.uuid4())
     ai_timestamp = datetime.now(timezone.utc)
     ai_message = {
@@ -377,7 +357,6 @@ async def send_message(message_data: MessageCreate, current_user: dict = Depends
     }
     await db.messages.insert_one(ai_message)
     
-    # Update conversation
     await db.conversations.update_one(
         {"id": conversation_id},
         {"$set": {"updated_at": ai_timestamp.isoformat()}}
@@ -429,7 +408,6 @@ async def get_conversations(current_user: dict = Depends(get_current_user)):
 async def get_conversation_messages(conversation_id: str, current_user: dict = Depends(get_current_user)):
     user_id = current_user["id"]
     
-    # Verify conversation belongs to user
     conversation = await db.conversations.find_one(
         {"id": conversation_id, "user_id": user_id},
         {"_id": 0}
@@ -455,12 +433,10 @@ async def get_conversation_messages(conversation_id: str, current_user: dict = D
 async def delete_conversation(conversation_id: str, current_user: dict = Depends(get_current_user)):
     user_id = current_user["id"]
     
-    # Verify and delete
     result = await db.conversations.delete_one({"id": conversation_id, "user_id": user_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Conversation not found")
     
-    # Delete associated messages
     await db.messages.delete_many({"conversation_id": conversation_id})
     
     return {"message": "Conversation deleted successfully"}
