@@ -41,7 +41,7 @@ function AppRoutes() {
 function App() {
   return (
     <div className="App">
-      <BrowserRouter basename="/sereni-chatbot">
+      <BrowserRouter>
         <AuthProvider>
           <AppRoutes />
           <Toaster position="top-center" richColors />
