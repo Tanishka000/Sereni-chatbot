@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 import bcrypt
 import jwt
-from openai import OpenAI
+from emergentintegrations.llm.chat import LlmChat, UserMessage
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -22,8 +22,8 @@ mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
-# OpenAI client
-openai_client = OpenAI(api_key=os.environ.get('OPENAI_API_KEY'))
+# Emergent LLM Key
+EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY')
 
 # JWT Config
 JWT_SECRET = os.environ.get('JWT_SECRET', 'sereni_secret')
@@ -335,25 +335,28 @@ async def send_message(message_data: MessageCreate, current_user: dict = Depends
         {"_id": 0}
     ).sort("timestamp", 1).to_list(20)
     
+    # Build prompt
     system_prompt = get_system_prompt(risk_level)
-    openai_messages = [{"role": "system", "content": system_prompt}]
     
+    conversation_history = []
     for msg in history[-10:]:
-        openai_messages.append({
-            "role": msg["role"],
-            "content": msg["content"]
-        })
+        role = "User" if msg["role"] == "user" else "Sereni"
+        conversation_history.append(f"{role}: {msg['content']}")
+    
+    history_text = "\n".join(conversation_history) if conversation_history else ""
+    full_prompt = f"{system_prompt}\n\nPrevious conversation:\n{history_text}"
     
     try:
-        response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=openai_messages,
-            temperature=0.85,
-            max_tokens=500
-        )
-        ai_content = response.choices[0].message.content
+        chat = LlmChat(
+            api_key=EMERGENT_LLM_KEY,
+            session_id=f"sereni-{conversation_id}",
+            system_message=full_prompt
+        ).with_model("openai", "gpt-4o-mini")
+        
+        user_msg_obj = UserMessage(text=message_data.content)
+        ai_content = await chat.send_message(user_msg_obj)
     except Exception as e:
-        logger.error(f"OpenAI API error: {e}")
+        logger.error(f"LLM API error: {e}")
         ai_content = "Hey, I'm having a tiny moment here, but I'm still here for you! Your feelings totally matter. Want to try sharing again? I'm all ears!"
     
     ai_msg_id = str(uuid.uuid4())
